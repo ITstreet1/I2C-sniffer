@@ -76,9 +76,9 @@ static volatile uint16_t sdaDownCnt = 0;//Auxiliary variable to count falling SD
 //Store the begining of the communication string. Modify it according to your setup.
 //String msgToServer = "http://192.168.0.19:5544/I2cServer?ADDR=0100000&data=";
 //v1.2
-String msgToServer = "http://34.76.152.176/deki/i2cSniffer/index.php?deviceID=1&data=";
-const char* ssid = "dekip_network";
-const char* password = "0611975itstreet";
+String msgToServer = "http://somesite.com/index.php?deviceID=1&data=";
+const char* ssid = "ssid";
+const char* password = "pass";
 const int deviceID = 1;
 
 ////////////////////////////
