@@ -29,6 +29,9 @@
     v1.1
     See additional parts marked with the version title v1.1
     The additionals makes possible to send the logged I2C communication content to a server via HTTP request.
+    v1.2
+    Adding WIFI comunication for sending data to a server
+    Few minor bugs fix
     */
 
 #include <Arduino.h>
@@ -44,6 +47,10 @@
 #define I2C_TRX 2
 //#define I2C_RESP 3
 //#define I2C_STOP 4
+
+//v1.2
+bool filterToPrint = 1;
+const volatile byte addressFilter[] = "0100000"; //I2C address to filter
 
 static volatile byte i2cStatus = I2C_IDLE;//Status of the I2C BUS
 static uint32_t lastStartMillis = 0;//stoe the last time
@@ -67,9 +74,11 @@ static volatile uint16_t sdaDownCnt = 0;//Auxiliary variable to count falling SD
 
 //v1.1
 //Store the begining of the communication string. Modify it according to your setup.
-String msgToServer = "http://192.168.0.19:5544/I2cServer?ADDR=0100000&data=";
-const char* ssid = "ssid";
-const char* password = "pass";
+//String msgToServer = "http://192.168.0.19:5544/I2cServer?ADDR=0100000&data=";
+//v1.2
+String msgToServer = "http://34.76.152.176/deki/i2cSniffer/index.php?deviceID=1&data=";
+const char* ssid = "dekip_network";
+const char* password = "0611975itstreet";
 const int deviceID = 1;
 
 ////////////////////////////
@@ -217,39 +226,12 @@ switch (i2cCase)
 
 /**
 
-    @desc Write out the buffer to the serial console
-
-*/
-void processDataBuffer()
-{
-if(bufferPoiW == bufferPoiR)//There is nothing to say
-return;
-
-uint16_t pw = bufferPoiW;
-//print out falseStart
-Serial.printf("\nprocessDataBuffer\nSCL up: %d SDA up: %d SDA down: %d false start: %d\n", sclUpCnt, sdaUpCnt, sdaDownCnt, falseStart);
-//print out the content of the buffer 
-for(int i=bufferPoiR; i< pw; i++)
-{
-  Serial.write(dataBuffer[i]);
-  bufferPoiR++;   
-}
-
-//if there is no I2C action in progress and there wasn't during the Serial.print then buffer was printed out completly and can be reset.
-if(i2cStatus == I2C_IDLE && pw==bufferPoiW)
-{
-  bufferPoiW =0;
-  bufferPoiR =0;
-} 
-
-}//END of processDataBuffer()
-
-/**
-
     v1.1
     @desc This method returns a String that contains everything that is available in the dataBuffer
     This function also resets the buffer, so this and processDataBuffer cannot be used in the same time.
     @ret String value. Returns the whole content of the dataBuffer as a string.
+    v1.2
+    Added filtering the byte array
 
 */
 String getStringFromDataBuffer()
@@ -262,11 +244,19 @@ uint16_t pw = bufferPoiW;
 //print out falseStart
 Serial.printf("\ngetStringFromDataBuffer\nSCL up: %d SDA up: %d SDA down: %d false start: %d\n", sclUpCnt, sdaUpCnt, sdaDownCnt, falseStart);
 //print out the content of the buffer 
-for(int i=bufferPoiR; i< pw; i++)
-{
-  ret += (char)dataBuffer[i];   
-  bufferPoiR++;   
-}
+//address filter
+  for(int i=bufferPoiR; i< (bufferPoiR+7); i++)
+  {
+    if (dataBuffer[i] != addressFilter[i]) filterToPrint=0;
+  }
+    if (filterToPrint){
+      for(int i=bufferPoiR; i< pw; i++){
+        Serial.write(dataBuffer[i]);
+        ret += (char)dataBuffer[i];   
+        bufferPoiR++;   
+      }
+    }
+filterToPrint = 1;
 
 //if there is no I2C action in progress and there wasn't during the Serial.print then buffer was printed out completly and can be reset.
 if(i2cStatus == I2C_IDLE && pw==bufferPoiW)
@@ -277,80 +267,86 @@ if(i2cStatus == I2C_IDLE && pw==bufferPoiW)
 
 return ret;
 
-}//END of processDataBuffer()
+}//END of getStringFromDataBuffer()
 
 /**
 
     v1.1
     This is an empty method.
     Write here any communication with a server
-
+    v1.2 
+    wifi support
 */
-void sendMsgOut(String argStr)
-{
-  argStr.replace(" ","");
+void sendMsgOut(String argStr){
+  Serial.println("sendMsg");
+  argStr.replace("\n","");
   Serial.println();
   Serial.println(argStr);
   Serial.println();
+
+  if(WiFi.status()== WL_CONNECTED){
+      HTTPClient http;
+      http.begin(argStr);
+      int httpResponseCode = http.GET();
+      if (httpResponseCode>0) {
+        Serial.print("HTTP Response code: ");
+        Serial.println(httpResponseCode);
+        String payload = http.getString();
+        Serial.println(payload);
+      }
+  }
 }
 
 /////////////////////////////////
 //// MAIN entry point of the program
 /////////////////////////////////
-void setup()
-{
-    Serial.begin(115200);
-    
-    #ifdef I2CTEST
-    pinMode(PIN_SCL, OUTPUT);   
-    pinMode(PIN_SDA, OUTPUT); 
-    #else
-    //Define pins for SCL, SDA
-    pinMode(PIN_SCL, INPUT_PULLUP);   
-    pinMode(PIN_SDA, INPUT_PULLUP);
-    //pinMode(PIN_SCL, INPUT);   
-    //pinMode(PIN_SDA, INPUT);
+void setup(){
+Serial.begin(115200);
+#ifdef I2CTEST
+pinMode(PIN_SCL, OUTPUT);   
+pinMode(PIN_SDA, OUTPUT); 
+#else
+//Define pins for SCL, SDA
+pinMode(PIN_SCL, INPUT_PULLUP);   
+pinMode(PIN_SDA, INPUT_PULLUP);
+//pinMode(PIN_SCL, INPUT);   
+//pinMode(PIN_SDA, INPUT);
 
 
-    //reset variables
-    resetI2cVariable();
+//reset variables
+resetI2cVariable();
 
-    //Atach interrupt handlers to the interrupts on GPIOs
-    attachInterrupt(PIN_SCL, i2cTriggerOnRaisingSCL, RISING); //trigger for reading data from SDA
-    attachInterrupt(PIN_SDA, i2cTriggerOnChangeSDA, CHANGE); //for I2C START and STOP
+//Atach interrupt handlers to the interrupts on GPIOs
+attachInterrupt(PIN_SCL, i2cTriggerOnRaisingSCL, RISING); //trigger for reading data from SDA
+attachInterrupt(PIN_SDA, i2cTriggerOnChangeSDA, CHANGE); //for I2C START and STOP
+#endif
 
-
-    //v1.1 Extension for WiFi sending
-    WiFi.begin(ssid, password);
-    Serial.println("Connecting");
-    while(WiFi.status() != WL_CONNECTED) 
-    {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
-    Serial.print("Connected to WiFi network with IP Address: ");
-    Serial.println(WiFi.localIP());
-
-
-    #endif
-
-
-
+WiFi.begin(ssid, password);
+  Serial.println("Connecting");
+  while(WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to WiFi network with IP Address: ");
+  Serial.println(WiFi.localIP());
+  
 }//END of setup
 
 /**
 
     LOOP
+
     v1.0
+
     @desc Writes I2C mcommunication to the serial if there is any.
-    
+
     v1.1
+
     @desc uses sendMsgOut to send I2C mcommunication to the specified server and format given by the msgToServer variable
     */
-    void loop()
-    {
-
+    void loop(){
+    Serial.println("Loop");
     #ifdef I2CTEST //do this in case it is testing the lines
     digitalWrite(PIN_SCL, HIGH); //13 Yellow
     digitalWrite(PIN_SDA, HIGH); //12 Blue
